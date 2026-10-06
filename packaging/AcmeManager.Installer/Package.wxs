@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
+
+  <Package Name="Certadel Agent"
+           Manufacturer="Certadel"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="7B5F2E1C-9A3D-4C8B-AE6F-1D2E3F4A5B6C"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <!-- AllowSameVersionUpgrades: a rebuilt package at the same version replaces the
+         installed one instead of registering as a second product beside it. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of acme-manager is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="acme-manager" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="acme-manager">
+      <ComponentGroupRef Id="ServiceComponent" />
+      <ComponentGroupRef Id="AppFiles" />
+    </Feature>
+  </Package>
+
+  <!-- The service executable, the Windows Service registration, recovery
+       policy, and the inbound firewall rule for the web UI on :9443. -->
+  <Fragment>
+    <ComponentGroup Id="ServiceComponent" Directory="INSTALLFOLDER">
+      <Component Id="ServiceExe" Bitness="always64">
+        <File Id="AcmeManagerServiceExe"
+              Source="$(var.PublishDir)\AcmeManager.Service.exe"
+              KeyPath="yes" />
+
+        <!-- DelayedAutoStart: after an update reboot the boot storm (Windows
+             servicing, IIS warmup) can push the cold start past the SCM's
+             30-second timeout, and recovery actions don't apply to failed
+             starts. Delayed start sidesteps the contention; certificates
+             don't need second-zero availability. -->
+        <ServiceInstall Id="AcmeManagerServiceInstall"
+                        Name="AcmeManager"
+                        DisplayName="Certadel Agent"
+                        Description="Automated TLS certificate management (ACME). Web UI on https://&lt;host&gt;:9443."
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem"
+                        Vital="yes">
+          <util:ServiceConfig FirstFailureActionType="restart"
+                              SecondFailureActionType="restart"
+                              ThirdFailureActionType="restart"
+                              RestartServiceDelayInSeconds="30"
+                              ResetPeriodInDays="1" />
+        </ServiceInstall>
+
+        <ServiceControl Id="AcmeManagerServiceControl"
+                        Name="AcmeManager"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+
+        <!-- Delayed auto-start. WiX's native ServiceConfig element is blocked
+             (WIX1149) and util:ServiceConfig only covers failure actions, so set
+             the SCM's own registry flag — equivalent to
+             `sc.exe config AcmeManager start= delayed-auto`. The whole service
+             key is removed with the service on uninstall. -->
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\AcmeManager"
+                       Name="DelayedAutostart"
+                       Type="integer"
+                       Value="1" />
+
+        <fw:FirewallException Id="AcmeManagerFirewall"
+                             Name="acme-manager (TCP 9443)"
+                             Description="acme-manager web UI"
+                             Port="9443"
+                             Protocol="tcp"
+                             Scope="any" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Everything else from the self-contained publish (runtime, plugins,
+       config). The service exe is excluded — it lives in its own component
+       above so the service registration can key off it. -->
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PublishDir)\**">
+        <Exclude Files="$(var.PublishDir)\AcmeManager.Service.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

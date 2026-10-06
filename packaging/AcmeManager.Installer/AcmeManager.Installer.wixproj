@@ -1,0 +1,27 @@
+<Project Sdk="WixToolset.Sdk/6.0.0">
+
+  <PropertyGroup>
+    <OutputName>acme-manager-setup</OutputName>
+    <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
+
+    <!-- Overridden by build-msi.ps1; defaults let the project build standalone. -->
+    <PublishDir Condition="'$(PublishDir)' == ''">$(MSBuildThisFileDirectory)..\..\artifacts\publish\win-x64</PublishDir>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.0</ProductVersion>
+
+    <DefineConstants>PublishDir=$(PublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
+
+    <!-- The self-contained publish is auto-harvested (<Files Include="**">), which
+         pulls in versioned native/managed DLLs (e.g. e_sqlite3.dll) that carry a
+         version but no language. That trips ICE60, a cosmetic check meant for shared
+         versioned files; it's safe to suppress for private app payload. ICE61 is the expected side effect of
+         AllowSameVersionUpgrades (the upgrade range includes the current version). -->
+    <SuppressIces>ICE60;ICE61</SuppressIces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.0" />
+    <PackageReference Include="WixToolset.Firewall.wixext" Version="6.0.0" />
+  </ItemGroup>
+
+</Project>

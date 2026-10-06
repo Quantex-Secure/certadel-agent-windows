@@ -1,0 +1,66 @@
+name: Build
+
+# Builds the MSI on every push/PR. Pushing a tag vX.Y.Z builds with that version and
+# publishes a GitHub Release with the MSI attached.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  msi:
+    name: Build MSI
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: core/global.json
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $v = $env:GITHUB_REF_NAME.TrimStart('v') }
+          else { $v = (dotnet msbuild core/src/AcmeManager.Service/AcmeManager.Service.csproj -getProperty:VersionPrefix -nologo).Trim() }
+          "value=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build MSI
+        shell: pwsh
+        run: ./packaging/build-msi.ps1 -Version ${{ steps.version.outputs.value }}
+
+      - name: Name the package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item packaging/AcmeManager.Installer/bin/x64/Release/acme-manager-setup.msi `
+            "dist/certadel-agent-windows-${{ steps.version.outputs.value }}.msi"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certadel-agent-windows-${{ steps.version.outputs.value }}
+          path: dist/*.msi
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME dist/*.msi --title "Certadel Agent for Windows $env:GITHUB_REF_NAME" --generate-notes
